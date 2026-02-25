@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Iron Pulse">
+<meta name="theme-color" content="#111114">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Iron Pulse</title>
+<link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiSXJvbiBQdWxzZSIsInNob3J0X25hbWUiOiJJcm9uIFB1bHNlIiwic3RhcnRfdXJsIjoiLiIsImRpc3BsYXkiOiJzdGFuZGFsb25lIiwiYmFja2dyb3VuZF9jb2xvciI6IiMxMTExMTQiLCJ0aGVtZV9jb2xvciI6IiMxMTExMTQiLCJpY29ucyI6W119">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { overscroll-behavior: none; }
+  body { background: #111114; font-family: 'DM Sans', sans-serif; color: #fff; }
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type="number"] { -moz-appearance: textfield; }
+  input { font-family: 'DM Sans', sans-serif; }
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+  @media (display-mode: standalone) {
+    body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+  }
+  #root { min-height: 100vh; min-height: 100dvh; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script type="text/babel">
+const { useState, useEffect, useCallback } = React;
+
+// ─── IndexedDB Storage ──────────────────────────────────────
+const DB_NAME = "IronPulseDB";
+const DB_VERSION = 1;
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains("data")) db.createObjectStore("data");
+    };
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror = (e) => reject(e.target.error);
+  });
+}
+
+async function dbGet(key) {
+  const db = await openDB();
+  return new Promise((resolve) => {
+    const tx = db.transaction("data", "readonly");
+    const req = tx.objectStore("data").get(key);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => resolve(null);
+  });
+}
+
+async function dbSet(key, value) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("data", "readwrite");
+    tx.objectStore("data").put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function loadFromStorage() {
+  try { return await dbGet("fitness-data"); } catch { return null; }
+}
+async function saveToStorage(data) {
+  try { await dbSet("fitness-data", data); } catch (e) { console.error("Save failed:", e); }
+}
+async function loadTemplates() {
+  try { return (await dbGet("fitness-templates")) || { push: [], pull: [], legs: [] }; } catch { return { push: [], pull: [], legs: [] }; }
+}
+async function saveTemplates(templates) {
+  try { await dbSet("fitness-templates", templates); } catch (e) { console.error("Template save failed:", e); }
+}
+
+// ─── Exercise Database ──────────────────────────────────────
+const EXERCISE_DB = {
+  push: {
+    label: "Push", color: "#E85D3A", muscles: "Chest, Shoulders, Triceps",
+    exercises: [
+      { name: "Barbell Bench Press", equipment: "barbell", primary: "Chest" },
+      { name: "Incline Barbell Bench Press", equipment: "barbell", primary: "Chest" },
+      { name: "Decline Barbell Bench Press", equipment: "barbell", primary: "Chest" },
+      { name: "Close-Grip Bench Press", equipment: "barbell", primary: "Chest" },
+      { name: "Floor Press (Barbell)", equipment: "barbell", primary: "Chest" },
+      { name: "Flat Dumbbell Press", equipment: "dumbbells", primary: "Chest" },
+      { name: "Incline Dumbbell Press", equipment: "dumbbells", primary: "Chest" },
+      { name: "Dumbbell Fly", equipment: "dumbbells", primary: "Chest" },
+      { name: "Push-Ups", equipment: "bodyweight", primary: "Chest" },
+      { name: "Diamond Push-Ups", equipment: "bodyweight", primary: "Triceps" },
+      { name: "Overhead Barbell Press", equipment: "barbell", primary: "Shoulders" },
+      { name: "Seated Barbell Press", equipment: "barbell", primary: "Shoulders" },
+      { name: "Push Press", equipment: "barbell", primary: "Shoulders" },
+      { name: "Barbell Upright Row", equipment: "barbell", primary: "Shoulders" },
+      { name: "Barbell Front Raise", equipment: "barbell", primary: "Shoulders" },
+      { name: "Overhead Dumbbell Press", equipment: "dumbbells", primary: "Shoulders" },
+      { name: "Lateral Dumbbell Raises", equipment: "dumbbells", primary: "Shoulders" },
+      { name: "Front Dumbbell Raises", equipment: "dumbbells", primary: "Shoulders" },
+      { name: "Arnold Press", equipment: "dumbbells", primary: "Shoulders" },
+      { name: "Cable Lateral Raises", equipment: "cable", primary: "Shoulders" },
+      { name: "Cable Upright Rows", equipment: "cable", primary: "Shoulders" },
+      { name: "Tricep Cable Pushdowns", equipment: "cable", primary: "Triceps" },
+      { name: "Barbell Skull Crushers", equipment: "barbell", primary: "Triceps" },
+      { name: "Barbell Overhead Tricep Extension", equipment: "barbell", primary: "Triceps" },
+      { name: "Overhead Tricep Extension", equipment: "dumbbells", primary: "Triceps" },
+      { name: "Tricep Dips", equipment: "bodyweight", primary: "Triceps" },
+      { name: "Close-Grip Push-Ups", equipment: "bodyweight", primary: "Triceps" },
+      { name: "Pike Push-Ups", equipment: "bodyweight", primary: "Shoulders" },
+    ],
+  },
+  pull: {
+    label: "Pull", color: "#3A8FE8", muscles: "Back, Biceps, Rear Delts",
+    exercises: [
+      { name: "Pull-Ups", equipment: "bodyweight", primary: "Back" },
+      { name: "Chin-Ups", equipment: "bodyweight", primary: "Biceps" },
+      { name: "Lat Pulldown", equipment: "cable", primary: "Back" },
+      { name: "Seated Cable Row", equipment: "cable", primary: "Back" },
+      { name: "Barbell Bent-Over Row", equipment: "barbell", primary: "Back" },
+      { name: "Pendlay Row", equipment: "barbell", primary: "Back" },
+      { name: "T-Bar Row", equipment: "barbell", primary: "Back" },
+      { name: "Barbell Seal Row", equipment: "barbell", primary: "Back" },
+      { name: "Meadows Row (Barbell)", equipment: "barbell", primary: "Back" },
+      { name: "Dumbbell Bent-Over Row", equipment: "dumbbells", primary: "Back" },
+      { name: "Single-Arm Dumbbell Row", equipment: "dumbbells", primary: "Back" },
+      { name: "Cable Face Pulls", equipment: "cable", primary: "Rear Delts" },
+      { name: "Reverse Fly", equipment: "dumbbells", primary: "Rear Delts" },
+      { name: "Barbell Curl", equipment: "barbell", primary: "Biceps" },
+      { name: "EZ-Bar Curl", equipment: "barbell", primary: "Biceps" },
+      { name: "Barbell Preacher Curl", equipment: "barbell", primary: "Biceps" },
+      { name: "Reverse Barbell Curl", equipment: "barbell", primary: "Biceps" },
+      { name: "Barbell Drag Curl", equipment: "barbell", primary: "Biceps" },
+      { name: "Dumbbell Bicep Curl", equipment: "dumbbells", primary: "Biceps" },
+      { name: "Hammer Curls", equipment: "dumbbells", primary: "Biceps" },
+      { name: "Incline Dumbbell Curl", equipment: "dumbbells", primary: "Biceps" },
+      { name: "Cable Bicep Curl", equipment: "cable", primary: "Biceps" },
+      { name: "Inverted Rows", equipment: "bodyweight", primary: "Back" },
+      { name: "Barbell Shrugs", equipment: "barbell", primary: "Traps" },
+      { name: "Dumbbell Shrugs", equipment: "dumbbells", primary: "Traps" },
+      { name: "Dumbbell Pullover", equipment: "dumbbells", primary: "Back" },
+    ],
+  },
+  legs: {
+    label: "Legs", color: "#3AE89F", muscles: "Quads, Hamstrings, Glutes, Calves, Core",
+    exercises: [
+      { name: "Barbell Back Squat", equipment: "barbell", primary: "Quads" },
+      { name: "Barbell Front Squat", equipment: "barbell", primary: "Quads" },
+      { name: "Barbell Lunges", equipment: "barbell", primary: "Quads" },
+      { name: "Barbell Reverse Lunges", equipment: "barbell", primary: "Quads" },
+      { name: "Barbell Hack Squat", equipment: "barbell", primary: "Quads" },
+      { name: "Zercher Squat", equipment: "barbell", primary: "Quads" },
+      { name: "Barbell Box Squat", equipment: "barbell", primary: "Quads" },
+      { name: "Goblet Squat", equipment: "dumbbells", primary: "Quads" },
+      { name: "Dumbbell Front Squat", equipment: "dumbbells", primary: "Quads" },
+      { name: "Dumbbell Lunges", equipment: "dumbbells", primary: "Quads" },
+      { name: "Dumbbell Reverse Lunges", equipment: "dumbbells", primary: "Quads" },
+      { name: "Dumbbell Walking Lunges", equipment: "dumbbells", primary: "Quads" },
+      { name: "Bulgarian Split Squat", equipment: "dumbbells", primary: "Quads" },
+      { name: "Dumbbell Step-Ups", equipment: "dumbbells", primary: "Quads" },
+      { name: "Dumbbell Lateral Lunges", equipment: "dumbbells", primary: "Quads" },
+      { name: "Dumbbell Curtsy Lunges", equipment: "dumbbells", primary: "Quads" },
+      { name: "Sumo Squat", equipment: "dumbbells", primary: "Quads" },
+      { name: "Dumbbell Sissy Squat", equipment: "dumbbells", primary: "Quads" },
+      { name: "Dumbbell Thruster", equipment: "dumbbells", primary: "Quads" },
+      { name: "Bodyweight Squat", equipment: "bodyweight", primary: "Quads" },
+      { name: "Jump Squats", equipment: "bodyweight", primary: "Quads" },
+      { name: "Pistol Squat", equipment: "bodyweight", primary: "Quads" },
+      { name: "Bodyweight Lunges", equipment: "bodyweight", primary: "Quads" },
+      { name: "Split Squat Jumps", equipment: "bodyweight", primary: "Quads" },
+      { name: "Wall Sit", equipment: "bodyweight", primary: "Quads" },
+      { name: "Box Jumps", equipment: "bodyweight", primary: "Quads" },
+      { name: "Sissy Squats", equipment: "bodyweight", primary: "Quads" },
+      { name: "Skater Squats", equipment: "bodyweight", primary: "Quads" },
+      { name: "Squat Pulse", equipment: "bodyweight", primary: "Quads" },
+      { name: "Barbell Romanian Deadlift", equipment: "barbell", primary: "Hamstrings" },
+      { name: "Barbell Stiff-Leg Deadlift", equipment: "barbell", primary: "Hamstrings" },
+      { name: "Conventional Deadlift", equipment: "barbell", primary: "Hamstrings" },
+      { name: "Barbell Good Mornings", equipment: "barbell", primary: "Hamstrings" },
+      { name: "Romanian Deadlift", equipment: "dumbbells", primary: "Hamstrings" },
+      { name: "Single-Leg RDL", equipment: "dumbbells", primary: "Hamstrings" },
+      { name: "Stiff-Leg Dumbbell Deadlift", equipment: "dumbbells", primary: "Hamstrings" },
+      { name: "Dumbbell Good Mornings", equipment: "dumbbells", primary: "Hamstrings" },
+      { name: "Nordic Hamstring Curls", equipment: "bodyweight", primary: "Hamstrings" },
+      { name: "Sliding Leg Curls", equipment: "bodyweight", primary: "Hamstrings" },
+      { name: "Cable Pull-Through", equipment: "cable", primary: "Hamstrings" },
+      { name: "Single-Leg Cable RDL", equipment: "cable", primary: "Hamstrings" },
+      { name: "Barbell Hip Thrusts", equipment: "barbell", primary: "Glutes" },
+      { name: "Barbell Glute Bridge", equipment: "barbell", primary: "Glutes" },
+      { name: "Barbell Sumo Deadlift", equipment: "barbell", primary: "Glutes" },
+      { name: "Dumbbell Hip Thrusts", equipment: "dumbbells", primary: "Glutes" },
+      { name: "Dumbbell Glute Bridge", equipment: "dumbbells", primary: "Glutes" },
+      { name: "Dumbbell Sumo Deadlift", equipment: "dumbbells", primary: "Glutes" },
+      { name: "Single-Leg Glute Bridge", equipment: "bodyweight", primary: "Glutes" },
+      { name: "Hip Thrusts", equipment: "bodyweight", primary: "Glutes" },
+      { name: "Glute Bridge", equipment: "bodyweight", primary: "Glutes" },
+      { name: "Frog Pumps", equipment: "bodyweight", primary: "Glutes" },
+      { name: "Donkey Kicks", equipment: "bodyweight", primary: "Glutes" },
+      { name: "Fire Hydrants", equipment: "bodyweight", primary: "Glutes" },
+      { name: "Cable Kickbacks", equipment: "cable", primary: "Glutes" },
+      { name: "Cable Hip Abduction", equipment: "cable", primary: "Glutes" },
+      { name: "Barbell Calf Raises", equipment: "barbell", primary: "Calves" },
+      { name: "Dumbbell Calf Raises", equipment: "dumbbells", primary: "Calves" },
+      { name: "Single-Leg Dumbbell Calf Raise", equipment: "dumbbells", primary: "Calves" },
+      { name: "Seated Dumbbell Calf Raise", equipment: "dumbbells", primary: "Calves" },
+      { name: "Bodyweight Calf Raises", equipment: "bodyweight", primary: "Calves" },
+      { name: "Single-Leg Calf Raises", equipment: "bodyweight", primary: "Calves" },
+      { name: "Jump Rope", equipment: "bodyweight", primary: "Calves" },
+      { name: "Dumbbell Farmer's Carry", equipment: "dumbbells", primary: "Core" },
+      { name: "Dumbbell Suitcase Carry", equipment: "dumbbells", primary: "Core" },
+      { name: "Plank", equipment: "bodyweight", primary: "Core" },
+      { name: "Side Plank", equipment: "bodyweight", primary: "Core" },
+      { name: "Dead Bugs", equipment: "bodyweight", primary: "Core" },
+      { name: "Hanging Knee Raises", equipment: "bodyweight", primary: "Core" },
+      { name: "Hanging Leg Raises", equipment: "bodyweight", primary: "Core" },
+      { name: "Ab Wheel Rollouts", equipment: "bodyweight", primary: "Core" },
+      { name: "Bicycle Crunches", equipment: "bodyweight", primary: "Core" },
+      { name: "Mountain Climbers", equipment: "bodyweight", primary: "Core" },
+      { name: "V-Ups", equipment: "bodyweight", primary: "Core" },
+      { name: "Flutter Kicks", equipment: "bodyweight", primary: "Core" },
+      { name: "Russian Twists", equipment: "dumbbells", primary: "Core" },
+      { name: "Dumbbell Woodchops", equipment: "dumbbells", primary: "Core" },
+      { name: "Cable Woodchops", equipment: "cable", primary: "Core" },
+      { name: "Cable Crunches", equipment: "cable", primary: "Core" },
+      { name: "Pallof Press", equipment: "cable", primary: "Core" },
+    ],
+  },
+};
+
+const CARDIO_TYPES = [
+  { id: "cycling", label: "Cycling", icon: "🚴", color: "#E8A83A" },
+  { id: "running", label: "Running", icon: "🏃", color: "#E83A6F" },
+  { id: "walking", label: "Walking", icon: "🚶", color: "#8B6FE8" },
+];
+
+const EQUIPMENT_ICONS = { barbell: "🔩", dumbbells: "🏋️", bodyweight: "💪", cable: "🔗" };
+
+function getToday() { return new Date().toISOString().split("T")[0]; }
+function formatDate(ds) { const d = new Date(ds + "T12:00:00"); return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }); }
+function formatDuration(minutes) { if (!minutes) return "—"; const h = Math.floor(minutes / 60); const m = minutes % 60; return h > 0 ? `${h}h ${m}m` : `${m}m`; }
+function formatTimer(seconds) { const m = Math.floor(seconds / 60); const s = seconds % 60; return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`; }
+
+const GOALS = { liftsPerWeek: 5, cardioPerWeek: 3 };
+
+function getWeekBounds() {
+  const now = new Date(); const day = now.getDay();
+  const monday = new Date(now); monday.setDate(now.getDate() - ((day + 6) % 7)); monday.setHours(0, 0, 0, 0);
+  const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+  return { start: monday.toISOString().split("T")[0], end: sunday.toISOString().split("T")[0] };
+}
+
+// ─── Exercise Illustration ──────────────────────────────────
+function ExerciseIllustration({ name, equipment, size = 48, color = "rgba(255,255,255,0.5)" }) {
+  const n = (name || "").toLowerCase(); const w = size, h = size; const sc = size / 48;
+  const s = (v) => v * sc; let pose = "stand";
+  if (n.includes("bench press") || (n.includes("floor press") && equipment === "barbell")) pose = "bench";
+  else if (n.includes("push-up") || n.includes("pushup") || (n.includes("plank") && !n.includes("side"))) pose = "pushup";
+  else if (n.includes("squat") || n.includes("goblet") || n.includes("thruster") || n.includes("wall sit") || n.includes("zercher") || n.includes("hack squat")) pose = "squat";
+  else if (n.includes("lunge") || n.includes("split squat") || n.includes("step-up") || n.includes("bulgarian")) pose = "lunge";
+  else if (n.includes("pull-up") || n.includes("chin-up") || n.includes("hang")) pose = "pullup";
+  else if (n.includes("curl") || n.includes("bicep") || n.includes("hammer") || n.includes("zottman") || n.includes("concentration") || n.includes("spider") || n.includes("waiter") || n.includes("21s") || n.includes("ez-bar") || n.includes("drag curl")) pose = "curl";
+  else if (n.includes("press") || n.includes("overhead") || n.includes("arnold") || n.includes("z-press") || n.includes("push press")) pose = "press";
+  else if (n.includes("fly") || n.includes("lateral") || n.includes("raise") || n.includes("bus driver") || n.includes("y-raise") || n.includes("upright row")) pose = "lateral";
+  else if (n.includes("row") || n.includes("bent-over") || n.includes("renegade") || n.includes("seal") || n.includes("kroc") || n.includes("meadow") || n.includes("pendlay") || n.includes("t-bar")) pose = "row";
+  else if (n.includes("deadlift") || n.includes("rdl") || n.includes("good morning") || n.includes("pull-through")) pose = "deadlift";
+  else if (n.includes("dip")) pose = "dip";
+  else if (n.includes("pulldown") || n.includes("lat pull") || n.includes("straight-arm")) pose = "pulldown";
+  else if (n.includes("pushdown") || n.includes("tricep cable") || n.includes("rope push")) pose = "pushdown";
+  else if (n.includes("bridge") || n.includes("hip thrust") || n.includes("frog")) pose = "bridge";
+  else if (n.includes("calf") || n.includes("jump rope")) pose = "calf";
+  else if (n.includes("kick") || n.includes("hydrant") || n.includes("donkey")) pose = "kick";
+  else if (n.includes("v-up") || n.includes("flutter") || n.includes("bicycle") || n.includes("crunch") || n.includes("ab wheel") || n.includes("dead bug") || n.includes("mountain")) pose = "core";
+  else if (n.includes("shrug") || n.includes("farmer") || n.includes("carry") || n.includes("suitcase")) pose = "shrug";
+  else if (n.includes("face pull") || n.includes("pull-apart") || n.includes("reverse fly") || n.includes("cable reverse")) pose = "facepull";
+  else if (n.includes("skull") || n.includes("tate") || n.includes("kickback")) pose = "skullcrusher";
+  else if (n.includes("woodchop") || n.includes("russian twist") || n.includes("pallof")) pose = "twist";
+  else if (n.includes("pike") || n.includes("handstand")) pose = "pike";
+  else if (n.includes("plank") || n.includes("side plank")) pose = "core";
+  else if (n.includes("inverted") || n.includes("australian")) pose = "invertedrow";
+  else if (n.includes("cable") && n.includes("fly")) pose = "lateral";
+  const stk = Math.max(1.5, s(2)); const hr = s(4); const cx = s(24);
+
+  const el = React.createElement;
+  const L = (props) => el("line", { strokeLinecap: "round", stroke: color, strokeWidth: stk, ...props });
+  const C = (cxp, cyp) => el("circle", { cx: cxp, cy: cyp, r: hr, fill: "none", stroke: color, strokeWidth: stk });
+
+  const poses = {
+    stand: el("g", null, C(cx, s(10)), L({x1:cx,y1:s(14),x2:cx,y2:s(28)}), L({x1:cx,y1:s(28),x2:s(18),y2:s(40)}), L({x1:cx,y1:s(28),x2:s(30),y2:s(40)}), L({x1:cx,y1:s(18),x2:s(16),y2:s(24)}), L({x1:cx,y1:s(18),x2:s(32),y2:s(24)})),
+    bench: el("g", null, L({x1:s(6),y1:s(28),x2:s(42),y2:s(28),strokeWidth:stk*0.7,opacity:0.3}), C(s(24),s(24)), L({x1:s(24),y1:s(28),x2:s(24),y2:s(36)}), L({x1:s(24),y1:s(36),x2:s(20),y2:s(44)}), L({x1:s(24),y1:s(36),x2:s(28),y2:s(44)}), L({x1:s(24),y1:s(30),x2:s(16),y2:s(26)}), L({x1:s(16),y1:s(26),x2:s(12),y2:s(16)}), L({x1:s(24),y1:s(30),x2:s(32),y2:s(26)}), L({x1:s(32),y1:s(26),x2:s(36),y2:s(16)}), el("line",{x1:s(8),y1:s(15),x2:s(40),y2:s(15),stroke:color,strokeWidth:s(3),strokeLinecap:"round",opacity:0.5})),
+    pushup: el("g", null, C(s(38),s(18)), L({x1:s(35),y1:s(20),x2:s(14),y2:s(24)}), L({x1:s(14),y1:s(24),x2:s(8),y2:s(38)}), L({x1:s(35),y1:s(22),x2:s(38),y2:s(30)}), L({x1:s(38),y1:s(30),x2:s(38),y2:s(38)}), L({x1:s(30),y1:s(22),x2:s(30),y2:s(38)})),
+    squat: el("g", null, C(cx,s(8)), L({x1:cx,y1:s(12),x2:cx,y2:s(22)}), L({x1:cx,y1:s(22),x2:s(16),y2:s(30)}), L({x1:s(16),y1:s(30),x2:s(16),y2:s(40)}), L({x1:cx,y1:s(22),x2:s(32),y2:s(30)}), L({x1:s(32),y1:s(30),x2:s(32),y2:s(40)}), L({x1:cx,y1:s(16),x2:s(16),y2:s(14)}), L({x1:cx,y1:s(16),x2:s(32),y2:s(14)}), equipment==="barbell" && el("line",{x1:s(8),y1:s(13),x2:s(40),y2:s(13),stroke:color,strokeWidth:s(2.5),strokeLinecap:"round",opacity:0.5})),
+    lunge: el("g", null, C(cx,s(8)), L({x1:cx,y1:s(12),x2:cx,y2:s(24)}), L({x1:cx,y1:s(24),x2:s(16),y2:s(32)}), L({x1:s(16),y1:s(32),x2:s(14),y2:s(40)}), L({x1:cx,y1:s(24),x2:s(34),y2:s(30)}), L({x1:s(34),y1:s(30),x2:s(34),y2:s(40)}), L({x1:cx,y1:s(16),x2:s(18),y2:s(22)}), L({x1:cx,y1:s(16),x2:s(30),y2:s(22)})),
+    pullup: el("g", null, L({x1:s(10),y1:s(6),x2:s(38),y2:s(6)}), C(cx,s(14)), L({x1:cx,y1:s(18),x2:cx,y2:s(32)}), L({x1:cx,y1:s(32),x2:s(20),y2:s(42)}), L({x1:cx,y1:s(32),x2:s(28),y2:s(42)}), L({x1:s(18),y1:s(6),x2:s(20),y2:s(12)}), L({x1:s(20),y1:s(12),x2:cx,y2:s(20)}), L({x1:s(30),y1:s(6),x2:s(28),y2:s(12)}), L({x1:s(28),y1:s(12),x2:cx,y2:s(20)})),
+    curl: el("g", null, C(cx,s(10)), L({x1:cx,y1:s(14),x2:cx,y2:s(28)}), L({x1:cx,y1:s(28),x2:s(20),y2:s(40)}), L({x1:cx,y1:s(28),x2:s(28),y2:s(40)}), L({x1:cx,y1:s(18),x2:s(28),y2:s(26)}), L({x1:s(28),y1:s(26),x2:s(30),y2:s(18)}), L({x1:cx,y1:s(18),x2:s(20),y2:s(26)}), L({x1:s(20),y1:s(26),x2:s(18),y2:s(18)}), el("rect",{x:s(16),y:s(15),width:s(4),height:s(3),rx:1,fill:color,opacity:0.5}), el("rect",{x:s(28),y:s(15),width:s(4),height:s(3),rx:1,fill:color,opacity:0.5})),
+    press: el("g", null, C(cx,s(14)), L({x1:cx,y1:s(18),x2:cx,y2:s(30)}), L({x1:cx,y1:s(30),x2:s(20),y2:s(42)}), L({x1:cx,y1:s(30),x2:s(28),y2:s(42)}), L({x1:cx,y1:s(22),x2:s(18),y2:s(18)}), L({x1:s(18),y1:s(18),x2:s(16),y2:s(8)}), L({x1:cx,y1:s(22),x2:s(30),y2:s(18)}), L({x1:s(30),y1:s(18),x2:s(32),y2:s(8)}), equipment==="barbell" ? el("line",{x1:s(8),y1:s(7),x2:s(40),y2:s(7),stroke:color,strokeWidth:s(2.5),strokeLinecap:"round",opacity:0.5}) : el("g", null, el("rect",{x:s(12),y:s(6),width:s(6),height:s(3),rx:1,fill:color,opacity:0.5}), el("rect",{x:s(30),y:s(6),width:s(6),height:s(3),rx:1,fill:color,opacity:0.5}))),
+    lateral: el("g", null, C(cx,s(10)), L({x1:cx,y1:s(14),x2:cx,y2:s(28)}), L({x1:cx,y1:s(28),x2:s(20),y2:s(40)}), L({x1:cx,y1:s(28),x2:s(28),y2:s(40)}), L({x1:cx,y1:s(18),x2:s(10),y2:s(16)}), L({x1:cx,y1:s(18),x2:s(38),y2:s(16)}), el("rect",{x:s(6),y:s(14),width:s(5),height:s(3),rx:1,fill:color,opacity:0.5}), el("rect",{x:s(37),y:s(14),width:s(5),height:s(3),rx:1,fill:color,opacity:0.5})),
+    row: el("g", null, C(s(32),s(12)), L({x1:s(30),y1:s(15),x2:s(20),y2:s(24)}), L({x1:s(20),y1:s(24),x2:s(16),y2:s(38)}), L({x1:s(20),y1:s(24),x2:s(26),y2:s(38)}), L({x1:cx,y1:s(20),x2:s(18),y2:s(28)}), L({x1:s(18),y1:s(28),x2:s(20),y2:s(20)}), L({x1:cx,y1:s(20),x2:s(30),y2:s(26)}), L({x1:s(30),y1:s(26),x2:s(32),y2:s(20)}), equipment==="barbell" ? el("line",{x1:s(12),y1:s(19),x2:s(36),y2:s(19),stroke:color,strokeWidth:s(2),strokeLinecap:"round",opacity:0.4}) : el("rect",{x:s(18),y:s(17),width:s(4),height:s(3),rx:1,fill:color,opacity:0.5})),
+    deadlift: el("g", null, C(s(28),s(10)), L({x1:s(26),y1:s(13),x2:s(20),y2:s(22)}), L({x1:s(20),y1:s(22),x2:s(16),y2:s(34)}), L({x1:s(16),y1:s(34),x2:s(14),y2:s(42)}), L({x1:s(20),y1:s(22),x2:cx,y2:s(34)}), L({x1:cx,y1:s(34),x2:cx,y2:s(42)}), L({x1:s(22),y1:s(18),x2:s(18),y2:s(30)}), L({x1:s(22),y1:s(18),x2:s(28),y2:s(26)}), equipment==="barbell" ? el("line",{x1:s(8),y1:s(30),x2:s(34),y2:s(30),stroke:color,strokeWidth:s(2.5),strokeLinecap:"round",opacity:0.5}) : el("rect",{x:s(14),y:s(29),width:s(8),height:s(3),rx:1,fill:color,opacity:0.5})),
+    dip: el("g", null, L({x1:s(8),y1:s(16),x2:s(40),y2:s(16)}), C(cx,s(10)), L({x1:cx,y1:s(14),x2:cx,y2:s(28)}), L({x1:cx,y1:s(28),x2:s(20),y2:s(38)}), L({x1:cx,y1:s(28),x2:s(28),y2:s(38)}), L({x1:cx,y1:s(18),x2:s(16),y2:s(16)}), L({x1:cx,y1:s(18),x2:s(32),y2:s(16)})),
+    pulldown: el("g", null, L({x1:s(10),y1:s(4),x2:s(38),y2:s(4),opacity:0.4}), C(cx,s(16)), L({x1:cx,y1:s(20),x2:cx,y2:s(32)}), L({x1:cx,y1:s(24),x2:s(16),y2:s(14)}), L({x1:s(16),y1:s(14),x2:s(14),y2:s(4),opacity:0.6}), L({x1:cx,y1:s(24),x2:s(32),y2:s(14)}), L({x1:s(32),y1:s(14),x2:s(34),y2:s(4),opacity:0.6}), L({x1:cx,y1:s(32),x2:s(20),y2:s(42)}), L({x1:cx,y1:s(32),x2:s(28),y2:s(42)})),
+    pushdown: el("g", null, C(cx,s(10)), L({x1:cx,y1:s(14),x2:cx,y2:s(28)}), L({x1:cx,y1:s(28),x2:s(20),y2:s(40)}), L({x1:cx,y1:s(28),x2:s(28),y2:s(40)}), L({x1:cx,y1:s(18),x2:s(20),y2:s(22)}), L({x1:s(20),y1:s(22),x2:s(20),y2:s(30)}), L({x1:cx,y1:s(18),x2:s(28),y2:s(22)}), L({x1:s(28),y1:s(22),x2:s(28),y2:s(30)})),
+    bridge: el("g", null, C(s(10),s(24)), L({x1:s(14),y1:s(24),x2:s(22),y2:s(18)}), L({x1:s(22),y1:s(18),x2:s(32),y2:s(18)}), L({x1:s(32),y1:s(18),x2:s(36),y2:s(28)}), L({x1:s(36),y1:s(28),x2:s(36),y2:s(36)}), L({x1:s(32),y1:s(18),x2:s(40),y2:s(24)}), L({x1:s(40),y1:s(24),x2:s(40),y2:s(36)})),
+    calf: el("g", null, C(cx,s(8)), L({x1:cx,y1:s(12),x2:cx,y2:s(26)}), L({x1:cx,y1:s(26),x2:s(22),y2:s(36)}), L({x1:cx,y1:s(26),x2:s(26),y2:s(36)}), L({x1:cx,y1:s(16),x2:s(18),y2:s(22)}), L({x1:cx,y1:s(16),x2:s(30),y2:s(22)})),
+    kick: el("g", null, C(s(14),s(20)), L({x1:s(18),y1:s(22),x2:cx,y2:s(28)}), L({x1:cx,y1:s(28),x2:s(22),y2:s(38)}), L({x1:cx,y1:s(28),x2:s(38),y2:s(22)}), L({x1:s(20),y1:s(24),x2:s(18),y2:s(32)}), L({x1:s(18),y1:s(32),x2:s(18),y2:s(38)})),
+    core: el("g", null, C(s(12),s(22)), L({x1:s(16),y1:s(24),x2:s(26),y2:s(28)}), L({x1:s(26),y1:s(28),x2:s(20),y2:s(38)}), L({x1:s(26),y1:s(28),x2:s(34),y2:s(36)}), L({x1:s(20),y1:s(26),x2:s(16),y2:s(30)}), L({x1:s(20),y1:s(26),x2:s(26),y2:s(22)})),
+    shrug: el("g", null, C(cx,s(8)), L({x1:cx,y1:s(12),x2:cx,y2:s(28)}), L({x1:cx,y1:s(28),x2:s(20),y2:s(40)}), L({x1:cx,y1:s(28),x2:s(28),y2:s(40)}), L({x1:cx,y1:s(14),x2:s(16),y2:s(12)}), L({x1:s(16),y1:s(12),x2:s(14),y2:s(26)}), L({x1:cx,y1:s(14),x2:s(32),y2:s(12)}), L({x1:s(32),y1:s(12),x2:s(34),y2:s(26)}), el("rect",{x:s(11),y:s(24),width:s(5),height:s(4),rx:1,fill:color,opacity:0.5}), el("rect",{x:s(32),y:s(24),width:s(5),height:s(4),rx:1,fill:color,opacity:0.5})),
+    facepull: el("g", null, C(cx,s(10)), L({x1:cx,y1:s(14),x2:cx,y2:s(28)}), L({x1:cx,y1:s(28),x2:s(20),y2:s(40)}), L({x1:cx,y1:s(28),x2:s(28),y2:s(40)}), L({x1:cx,y1:s(18),x2:s(16),y2:s(16)}), L({x1:s(16),y1:s(16),x2:s(12),y2:s(10)}), L({x1:cx,y1:s(18),x2:s(32),y2:s(16)}), L({x1:s(32),y1:s(16),x2:s(36),y2:s(10)})),
+    skullcrusher: el("g", null, C(s(10),s(24)), L({x1:s(14),y1:s(24),x2:s(34),y2:s(24)}), L({x1:s(34),y1:s(24),x2:s(38),y2:s(34)}), L({x1:s(34),y1:s(24),x2:s(38),y2:s(14)}), L({x1:s(22),y1:s(24),x2:s(22),y2:s(16)}), L({x1:s(22),y1:s(16),x2:s(16),y2:s(18)}), el("rect",{x:s(13),y:s(16),width:s(5),height:s(3),rx:1,fill:color,opacity:0.5})),
+    twist: el("g", null, C(cx,s(10)), L({x1:cx,y1:s(14),x2:cx,y2:s(26)}), L({x1:cx,y1:s(26),x2:s(18),y2:s(36)}), L({x1:cx,y1:s(26),x2:s(30),y2:s(36)}), L({x1:cx,y1:s(18),x2:s(12),y2:s(20)}), L({x1:cx,y1:s(18),x2:s(36),y2:s(16)}), el("rect",{x:s(8),y:s(18),width:s(5),height:s(3),rx:1,fill:color,opacity:0.5})),
+    pike: el("g", null, C(cx,s(12)), L({x1:cx,y1:s(16),x2:cx,y2:s(22)}), L({x1:cx,y1:s(22),x2:s(20),y2:s(30)}), L({x1:s(20),y1:s(30),x2:s(20),y2:s(40)}), L({x1:cx,y1:s(22),x2:s(28),y2:s(30)}), L({x1:s(28),y1:s(30),x2:s(28),y2:s(40)}), L({x1:cx,y1:s(18),x2:s(18),y2:s(10)}), L({x1:cx,y1:s(18),x2:s(30),y2:s(10)})),
+    invertedrow: el("g", null, L({x1:s(8),y1:s(14),x2:s(40),y2:s(14),opacity:0.3}), C(s(34),s(22)), L({x1:s(32),y1:s(24),x2:s(14),y2:s(28)}), L({x1:s(14),y1:s(28),x2:s(10),y2:s(38)}), L({x1:s(24),y1:s(26),x2:s(24),y2:s(14)}), L({x1:s(18),y1:s(27),x2:s(18),y2:s(14)})),
+  };
+  return el("svg", { width: w, height: h, viewBox: `0 0 ${w} ${h}`, style: { flexShrink: 0 } }, poses[pose] || poses.stand);
+}
+
+// ─── Goal Progress Ring ─────────────────────────────────────
+function GoalRing({ current, target, label, color, size = 80 }) {
+  const r = (size - 10) / 2; const circ = 2 * Math.PI * r; const pct = Math.min(current / target, 1); const offset = circ * (1 - pct); const met = current >= target;
+  return (
+    <div style={{ textAlign: "center" }}>
+      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={5}/>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={met ? "#3AE89F" : color} strokeWidth={5} strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.5s ease" }}/>
+      </svg>
+      <div style={{ marginTop: -size+10, height: size-10, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ fontSize: size*0.3, fontWeight: 900, color: met ? "#3AE89F" : "#fff", fontFamily: "'Bebas Neue', sans-serif" }}>{current}/{target}</div>
+      </div>
+      <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: "'DM Sans', sans-serif", fontWeight: 700, marginTop: 6 }}>{label}</div>
+      {met && <div style={{ fontSize: 9, color: "#3AE89F", fontFamily: "'DM Sans', sans-serif", fontWeight: 700, marginTop: 2 }}>GOAL MET ✓</div>}
+    </div>
+  );
+}
+
+function WorkoutTimer({ startTime, color }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => { if (!startTime) return; const iv = setInterval(() => setElapsed(Math.floor((Date.now() - startTime) / 1000)), 1000); return () => clearInterval(iv); }, [startTime]);
+  if (!startTime) return null;
+  return (
+    <div style={{ textAlign: "center", padding: "12px 0", marginBottom: 16, background: `${color}10`, borderRadius: 14, border: `1px solid ${color}30` }}>
+      <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "'DM Sans', sans-serif", fontWeight: 700, marginBottom: 4 }}>Workout Timer</div>
+      <div style={{ fontSize: 36, fontWeight: 900, color, fontFamily: "'Bebas Neue', sans-serif", letterSpacing: "0.04em" }}>{formatTimer(elapsed)}</div>
+    </div>
+  );
+}
+
+function TabBar({ activeTab, onTabChange }) {
+  const tabs = [{ id: "today", label: "Today" }, { id: "weights", label: "Weights" }, { id: "cardio", label: "Cardio" }, { id: "history", label: "History" }, { id: "exercises", label: "Library" }];
+  return (
+    <div style={{ display: "flex", gap: 2, padding: "6px", background: "rgba(255,255,255,0.03)", borderRadius: 16, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 24 }}>
+      {tabs.map(t => (
+        <button key={t.id} onClick={() => onTabChange(t.id)} style={{ flex: 1, padding: "10px 4px", border: "none", borderRadius: 12, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", letterSpacing: "0.01em", background: activeTab === t.id ? "rgba(232,93,58,0.15)" : "transparent", color: activeTab === t.id ? "#E85D3A" : "rgba(255,255,255,0.4)", transition: "all 0.2s" }}>
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function WorkoutTypeSelector({ selected, onSelect, suggestedType }) {
+  const types = [{ id: "push", ...EXERCISE_DB.push }, { id: "pull", ...EXERCISE_DB.pull }, { id: "legs", ...EXERCISE_DB.legs }];
+  return (
+    <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
+      {types.map(t => (
+        <button key={t.id} onClick={() => onSelect(t.id)} style={{ flex: 1, padding: "16px 8px", border: "2px solid", borderColor: selected === t.id ? t.color : "rgba(255,255,255,0.08)", borderRadius: 14, cursor: "pointer", background: selected === t.id ? `${t.color}15` : "rgba(255,255,255,0.02)", transition: "all 0.25s", position: "relative" }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: selected === t.id ? t.color : "rgba(255,255,255,0.5)", fontFamily: "'DM Sans', sans-serif" }}>{t.label}</div>
+          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 4, fontFamily: "'DM Sans', sans-serif" }}>{t.muscles}</div>
+          {suggestedType === t.id && <div style={{ position: "absolute", top: -8, right: -8, background: t.color, color: "#fff", fontSize: 9, padding: "2px 8px", borderRadius: 20, fontWeight: 700, fontFamily: "'DM Sans', sans-serif" }}>NEXT UP</div>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ExerciseCard({ exercise, onAddSet, onUpdateSet, onRemoveSet, onRemoveExercise, typeColor, completedSets = 0 }) {
+  return (
+    <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 14, padding: 16, marginBottom: 12, borderLeft: `3px solid ${typeColor}` }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <ExerciseIllustration name={exercise.name} equipment={exercise.equipment} size={40} color={typeColor} />
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#fff", fontFamily: "'DM Sans', sans-serif" }}>{exercise.name}</div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 2, fontFamily: "'DM Sans', sans-serif" }}>{exercise.primary} · {EQUIPMENT_ICONS[exercise.equipment]} {exercise.equipment}</div>
+          </div>
+        </div>
+        <button onClick={onRemoveExercise} style={{ background: "rgba(255,80,80,0.1)", border: "none", color: "rgba(255,80,80,0.6)", cursor: "pointer", fontSize: 11, padding: "4px 10px", borderRadius: 8, fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}>Remove</button>
+      </div>
+      {exercise.sets.map((set, i) => (
+        <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.04)", opacity: i < completedSets ? 0.5 : 1 }}>
+          <span style={{ width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, fontFamily: "'DM Sans', sans-serif", background: i < completedSets ? "rgba(34,197,94,0.15)" : "rgba(255,255,255,0.04)", color: i < completedSets ? "#22c55e" : "rgba(255,255,255,0.3)" }}>{i < completedSets ? "✓" : i + 1}</span>
+          <div style={{ flex: 1, display: "flex", gap: 8, alignItems: "center" }}>
+            <div>
+              <label style={{ fontSize: 9, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "'DM Sans', sans-serif" }}>Weight</label>
+              <input type="number" value={set.weight || ""} onChange={e => onUpdateSet(i, { ...set, weight: Number(e.target.value) })} placeholder="lbs" style={{ width: 70, padding: "6px 8px", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, background: "rgba(255,255,255,0.04)", color: "#fff", fontSize: 15, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", outline: "none" }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 9, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "'DM Sans', sans-serif" }}>Reps</label>
+              <input type="number" value={set.reps || ""} onChange={e => onUpdateSet(i, { ...set, reps: Number(e.target.value) })} placeholder="reps" style={{ width: 60, padding: "6px 8px", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, background: "rgba(255,255,255,0.04)", color: "#fff", fontSize: 15, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", outline: "none" }} />
+            </div>
+          </div>
+          <button onClick={() => onRemoveSet(i)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.2)", cursor: "pointer", fontSize: 18, padding: "4px 8px" }}>×</button>
+        </div>
+      ))}
+      <button onClick={onAddSet} style={{ marginTop: 8, padding: "6px 14px", border: "1px dashed rgba(255,255,255,0.12)", borderRadius: 8, background: "transparent", color: "rgba(255,255,255,0.4)", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", width: "100%" }}>+ Add Set</button>
+    </div>
+  );
+}
+
+function ExercisePicker({ type, onSelect, onClose }) {
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const exercises = EXERCISE_DB[type]?.exercises || [];
+  const filtered = exercises.filter(e => filter === "all" || e.equipment === filter).filter(e => !search || e.name.toLowerCase().includes(search.toLowerCase()) || e.primary.toLowerCase().includes(search.toLowerCase()));
+  const typeColor = EXERCISE_DB[type]?.color || "#fff";
+  const grouped = {};
+  filtered.forEach(ex => { if (!grouped[ex.primary]) grouped[ex.primary] = []; grouped[ex.primary].push(ex); });
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 1000, padding: 16 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#1a1a1e", borderRadius: "20px 20px 0 0", width: "100%", maxWidth: 480, maxHeight: "80vh", overflow: "auto", padding: 24, border: "1px solid rgba(255,255,255,0.08)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: typeColor, fontFamily: "'DM Sans', sans-serif" }}>Add {EXERCISE_DB[type]?.label} Exercise</h3>
+          <button onClick={onClose} style={{ background: "rgba(255,255,255,0.06)", border: "none", color: "#fff", cursor: "pointer", fontSize: 18, width: 36, height: 36, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+        </div>
+        <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search exercises..." style={{ width: "100%", padding: "10px 14px", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, background: "rgba(255,255,255,0.04)", color: "#fff", fontSize: 13, fontFamily: "'DM Sans', sans-serif", outline: "none", marginBottom: 12, boxSizing: "border-box" }} />
+        <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
+          {["all", "barbell", "dumbbells", "bodyweight", "cable"].map(f => (
+            <button key={f} onClick={() => setFilter(f)} style={{ padding: "6px 12px", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", textTransform: "capitalize", background: filter === f ? `${typeColor}20` : "rgba(255,255,255,0.04)", color: filter === f ? typeColor : "rgba(255,255,255,0.4)" }}>{f === "all" ? "All" : `${EQUIPMENT_ICONS[f]} ${f}`}</button>
+          ))}
+        </div>
+        {Object.entries(grouped).map(([muscle, exs]) => (
+          <div key={muscle}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: typeColor, textTransform: "uppercase", letterSpacing: "0.08em", padding: "8px 0 6px", borderBottom: `1px solid ${typeColor}15`, marginBottom: 4, fontFamily: "'DM Sans', sans-serif" }}>{muscle}</div>
+            {exs.map((ex, i) => (
+              <button key={i} onClick={() => { onSelect(ex); onClose(); }} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 12px", border: "none", borderRadius: 10, cursor: "pointer", background: "rgba(255,255,255,0.02)", color: "#fff", marginBottom: 4, textAlign: "left" }}>
+                <ExerciseIllustration name={ex.name} equipment={ex.equipment} size={42} color={typeColor} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{ex.name}</div>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontFamily: "'DM Sans', sans-serif" }}>{EQUIPMENT_ICONS[ex.equipment]} {ex.equipment}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        ))}
+        {Object.keys(grouped).length === 0 && <div style={{ padding: 32, textAlign: "center", color: "rgba(255,255,255,0.25)", fontFamily: "'DM Sans', sans-serif" }}>No exercises found</div>}
+      </div>
+    </div>
+  );
+}
+
+// ─── Views ──────────────────────────────────────────────────
+function TodayView({ data, getSuggestedType }) {
+  const today = getToday();
+  const todayWorkouts = data.workouts.filter(w => w.date === today);
+  const todayCardio = data.cardioSessions.filter(c => c.date === today);
+  const suggested = getSuggestedType();
+  const week = getWeekBounds();
+  const weekWorkouts = data.workouts.filter(w => w.date >= week.start && w.date <= week.end);
+  const weekCardio = data.cardioSessions.filter(c => c.date >= week.start && c.date <= week.end);
+  const liftDays = new Set(weekWorkouts.map(w => w.date)).size;
+  const cardioDays = new Set(weekCardio.map(c => c.date)).size;
+  const totalSets = weekWorkouts.reduce((acc, w) => acc + w.exercises.reduce((a, e) => a + e.sets.length, 0), 0);
+  const totalCardioMin = weekCardio.reduce((acc, c) => acc + (c.duration || 0), 0);
+  let streak = 0; let checkDate = new Date();
+  while (true) {
+    const ds = checkDate.toISOString().split("T")[0];
+    if (data.workouts.some(w => w.date === ds) || data.cardioSessions.some(c => c.date === ds)) { streak++; checkDate.setDate(checkDate.getDate() - 1); } else break;
+  }
+  return (
+    <div>
+      <div style={{ marginBottom: 24 }}>
+        <h2 style={{ margin: 0, fontSize: 28, fontWeight: 900, color: "#fff", fontFamily: "'Bebas Neue', sans-serif", letterSpacing: "0.02em" }}>{formatDate(today)}</h2>
+        <p style={{ margin: "4px 0 0", fontSize: 13, color: "rgba(255,255,255,0.4)", fontFamily: "'DM Sans', sans-serif" }}>{streak > 0 ? `🔥 ${streak}-day streak` : "Start your streak today"}</p>
+      </div>
+      <div style={{ display: "flex", justifyContent: "center", gap: 32, marginBottom: 28, padding: "20px 0", background: "rgba(255,255,255,0.02)", borderRadius: 16, border: "1px solid rgba(255,255,255,0.06)" }}>
+        <GoalRing current={liftDays} target={GOALS.liftsPerWeek} label="Lifts / Week" color="#E85D3A" size={90} />
+        <GoalRing current={cardioDays} target={GOALS.cardioPerWeek} label="Cardio / Week" color="#E8A83A" size={90} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 24 }}>
+        {[{ label: "Total Sessions", value: weekWorkouts.length + weekCardio.length, sub: "this week" }, { label: "Sets Done", value: totalSets, sub: "weight training" }, { label: "Cardio Time", value: formatDuration(totalCardioMin), sub: "total" }].map((s, i) => (
+          <div key={i} style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 14, padding: "14px 12px", textAlign: "center" }}>
+            <div style={{ fontSize: 22, fontWeight: 900, color: "#fff", fontFamily: "'Bebas Neue', sans-serif" }}>{s.value}</div>
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: "'DM Sans', sans-serif" }}>{s.label}</div>
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.2)", fontFamily: "'DM Sans', sans-serif" }}>{s.sub}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ background: `linear-gradient(135deg, ${EXERCISE_DB[suggested]?.color}15, transparent)`, border: `1px solid ${EXERCISE_DB[suggested]?.color}30`, borderRadius: 16, padding: 20, marginBottom: 24 }}>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6, fontFamily: "'DM Sans', sans-serif", fontWeight: 700 }}>Suggested Next</div>
+        <div style={{ fontSize: 22, fontWeight: 900, color: EXERCISE_DB[suggested]?.color, fontFamily: "'Bebas Neue', sans-serif" }}>{EXERCISE_DB[suggested]?.label} Day</div>
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", fontFamily: "'DM Sans', sans-serif" }}>{EXERCISE_DB[suggested]?.muscles}</div>
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 12px", fontFamily: "'DM Sans', sans-serif" }}>Today's Activity</h3>
+        {todayWorkouts.length === 0 && todayCardio.length === 0 ? (
+          <div style={{ padding: 32, textAlign: "center", color: "rgba(255,255,255,0.25)", border: "1px dashed rgba(255,255,255,0.08)", borderRadius: 14, fontFamily: "'DM Sans', sans-serif", fontSize: 13 }}>No workouts logged yet today. Hit the Weights or Cardio tab to get started.</div>
+        ) : (
+          <>
+            {todayWorkouts.map((w, i) => (
+              <div key={i} style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: 14, marginBottom: 8, borderLeft: `3px solid ${EXERCISE_DB[w.type]?.color}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: EXERCISE_DB[w.type]?.color, fontFamily: "'DM Sans', sans-serif" }}>{EXERCISE_DB[w.type]?.label}</span>
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", fontFamily: "'DM Sans', sans-serif" }}>{w.exercises.length} exercises · {w.exercises.reduce((a, e) => a + e.sets.length, 0)} sets</span>
+                </div>
+              </div>
+            ))}
+            {todayCardio.map((c, i) => { const ct = CARDIO_TYPES.find(t => t.id === c.type); return (
+              <div key={i} style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: 14, marginBottom: 8, borderLeft: `3px solid ${ct?.color}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: ct?.color, fontFamily: "'DM Sans', sans-serif" }}>{ct?.icon} {ct?.label}</span>
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", fontFamily: "'DM Sans', sans-serif" }}>{c.distance ? `${c.distance} mi · ` : ""}{formatDuration(c.duration)}</span>
+                </div>
+              </div>
+            ); })}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WeightsView({ data, setData, getSuggestedType }) {
+  const [workoutType, setWorkoutType] = useState(null);
+  const [exercises, setExercises] = useState([]);
+  const [showPicker, setShowPicker] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [workoutStatus, setWorkoutStatus] = useState("idle");
+  const [startTime, setStartTime] = useState(null);
+  const [completedSetsMap, setCompletedSetsMap] = useState({});
+  const [templates, setTemplates] = useState({ push: [], pull: [], legs: [] });
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [showSaveTemplate, setShowSaveTemplate] = useState(false);
+  const suggested = getSuggestedType();
+  useEffect(() => { if (!workoutType) setWorkoutType(suggested); }, [suggested]);
+  useEffect(() => { loadTemplates().then(t => setTemplates(t)); }, []);
+
+  const addExercise = (ex) => { setExercises([...exercises, { ...ex, sets: [{ weight: 0, reps: 0 }] }]); setSaved(false); };
+  const loadTemplate = (template) => { setExercises(template.exercises.map(ex => ({ ...ex, sets: ex.sets.map(s => ({ weight: s.weight || 0, reps: s.reps || 0 })) }))); setShowTemplates(false); setSaved(false); setCompletedSetsMap({}); };
+  const saveTemplate = async () => { if (!templateName.trim() || exercises.length === 0) return; const template = { id: Date.now(), name: templateName.trim(), exercises: exercises.map(e => ({ name: e.name, equipment: e.equipment, primary: e.primary, sets: e.sets.map(s => ({ weight: s.weight || 0, reps: s.reps || 0 })) })) }; const updated = { ...templates, [workoutType]: [...(templates[workoutType] || []), template] }; setTemplates(updated); await saveTemplates(updated); setShowSaveTemplate(false); setTemplateName(""); };
+  const deleteTemplate = async (templateId) => { const updated = { ...templates, [workoutType]: (templates[workoutType] || []).filter(t => t.id !== templateId) }; setTemplates(updated); await saveTemplates(updated); };
+  const addSet = (exIndex) => { const updated = [...exercises]; const lastSet = updated[exIndex].sets[updated[exIndex].sets.length - 1]; updated[exIndex].sets.push({ weight: lastSet?.weight || 0, reps: lastSet?.reps || 0 }); setExercises(updated); setSaved(false); };
+  const updateSet = (exIndex, setIndex, newSet) => { const updated = [...exercises]; updated[exIndex].sets[setIndex] = newSet; setExercises(updated); setSaved(false); };
+  const removeSet = (exIndex, setIndex) => { const updated = [...exercises]; updated[exIndex].sets.splice(setIndex, 1); setExercises(updated); setSaved(false); };
+  const removeExercise = (index) => { setExercises(exercises.filter((_, i) => i !== index)); const newMap = {}; Object.entries(completedSetsMap).forEach(([k, v]) => { const ki = Number(k); if (ki < index) newMap[ki] = v; else if (ki > index) newMap[ki - 1] = v; }); setCompletedSetsMap(newMap); setSaved(false); };
+  const handleStart = () => { setWorkoutStatus("active"); setStartTime(Date.now()); setCompletedSetsMap({}); };
+  const handleSetComplete = () => { for (let i = 0; i < exercises.length; i++) { const completed = completedSetsMap[i] || 0; if (completed < exercises[i].sets.length) { setCompletedSetsMap({ ...completedSetsMap, [i]: completed + 1 }); return; } } };
+  const handleFinish = async () => { if (exercises.length === 0) return; const duration = startTime ? Math.floor((Date.now() - startTime) / 1000) : 0; const workout = { id: Date.now(), date: getToday(), type: workoutType, duration, exercises: exercises.map(e => ({ name: e.name, equipment: e.equipment, primary: e.primary, sets: e.sets.filter(s => s.reps > 0) })) }; const newData = { ...data, workouts: [...data.workouts, workout] }; setData(newData); await saveToStorage(newData); setSaved(true); setWorkoutStatus("idle"); setStartTime(null); setCompletedSetsMap({}); setTimeout(() => { setExercises([]); setSaved(false); }, 1500); };
+
+  const typeColor = EXERCISE_DB[workoutType]?.color || "#E85D3A";
+  const totalSets = exercises.reduce((a, e) => a + e.sets.length, 0);
+  const totalCompleted = Object.values(completedSetsMap).reduce((a, b) => a + b, 0);
+
+  return (
+    <div>
+      <h2 style={{ margin: "0 0 16px", fontSize: 24, fontWeight: 900, color: "#fff", fontFamily: "'Bebas Neue', sans-serif", letterSpacing: "0.02em" }}>Weight Training</h2>
+      <WorkoutTypeSelector selected={workoutType} onSelect={(t) => workoutStatus === "idle" && setWorkoutType(t)} suggestedType={suggested} />
+      {workoutStatus === "idle" && workoutType && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <button onClick={() => setShowTemplates(true)} style={{ flex: 1, padding: "10px 14px", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.6)", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'DM Sans', sans-serif" }}>📋 Load Template {(templates[workoutType]?.length || 0) > 0 ? `(${templates[workoutType].length})` : ""}</button>
+          {exercises.length > 0 && <button onClick={() => setShowSaveTemplate(true)} style={{ flex: 1, padding: "10px 14px", border: `1px solid ${typeColor}40`, borderRadius: 10, background: `${typeColor}10`, color: typeColor, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'DM Sans', sans-serif" }}>💾 Save as Template</button>}
+        </div>
+      )}
+
+      {showTemplates && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }} onClick={e => { if (e.target === e.currentTarget) setShowTemplates(false); }}>
+          <div style={{ background: "#1a1a1e", borderRadius: 20, width: "100%", maxWidth: 420, maxHeight: "70vh", overflow: "auto", padding: 24, border: "1px solid rgba(255,255,255,0.08)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: typeColor, fontFamily: "'DM Sans', sans-serif" }}>{EXERCISE_DB[workoutType]?.label} Templates</h3>
+              <button onClick={() => setShowTemplates(false)} style={{ background: "rgba(255,255,255,0.06)", border: "none", color: "#fff", cursor: "pointer", fontSize: 18, width: 36, height: 36, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+            </div>
+            {(templates[workoutType]?.length || 0) === 0 ? (
+              <div style={{ padding: 32, textAlign: "center", color: "rgba(255,255,255,0.25)", fontFamily: "'DM Sans', sans-serif", fontSize: 13 }}>No templates saved yet. Build a workout and tap "Save as Template" to create one.</div>
+            ) : templates[workoutType].map(t => (
+              <div key={t.id} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 14, padding: 16, marginBottom: 10, borderLeft: `3px solid ${typeColor}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: typeColor, fontFamily: "'DM Sans', sans-serif" }}>{t.name}</div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontFamily: "'DM Sans', sans-serif", marginTop: 2 }}>{t.exercises.length} exercises · {t.exercises.reduce((a, e) => a + e.sets.length, 0)} sets</div>
+                  </div>
+                  <button onClick={() => deleteTemplate(t.id)} style={{ background: "rgba(255,60,60,0.08)", border: "none", color: "rgba(255,60,60,0.5)", cursor: "pointer", fontSize: 11, padding: "4px 10px", borderRadius: 8, fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}>Delete</button>
+                </div>
+                <div style={{ marginBottom: 10 }}>
+                  {t.exercises.map((ex, j) => (
+                    <div key={j} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0" }}>
+                      <ExerciseIllustration name={ex.name} equipment={ex.equipment} size={24} color="rgba(255,255,255,0.4)" />
+                      <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", fontFamily: "'DM Sans', sans-serif" }}>{ex.name} <span style={{ color: "rgba(255,255,255,0.25)" }}>({ex.sets.length} sets{ex.sets[0]?.weight ? ` · ${ex.sets[0].weight}lb` : ""})</span></span>
+                    </div>
+                  ))}
+                </div>
+                <button onClick={() => loadTemplate(t)} style={{ width: "100%", padding: "10px", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "'DM Sans', sans-serif", background: `${typeColor}20`, color: typeColor }}>Load This Template</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showSaveTemplate && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }} onClick={e => { if (e.target === e.currentTarget) setShowSaveTemplate(false); }}>
+          <div style={{ background: "#1a1a1e", borderRadius: 20, width: "100%", maxWidth: 380, padding: 24, border: "1px solid rgba(255,255,255,0.08)" }}>
+            <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 800, color: typeColor, fontFamily: "'DM Sans', sans-serif" }}>Save Template</h3>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", fontFamily: "'DM Sans', sans-serif", marginBottom: 12 }}>{exercises.length} exercises · {exercises.reduce((a, e) => a + e.sets.length, 0)} sets</div>
+            <input type="text" value={templateName} onChange={e => setTemplateName(e.target.value)} placeholder={`e.g. "Heavy ${EXERCISE_DB[workoutType]?.label} Day"`} style={{ width: "100%", padding: "12px 14px", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, background: "rgba(255,255,255,0.04)", color: "#fff", fontSize: 14, fontFamily: "'DM Sans', sans-serif", outline: "none", marginBottom: 16, boxSizing: "border-box" }} />
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setShowSaveTemplate(false)} style={{ flex: 1, padding: "12px", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, background: "transparent", color: "rgba(255,255,255,0.5)", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "'DM Sans', sans-serif" }}>Cancel</button>
+              <button onClick={saveTemplate} disabled={!templateName.trim()} style={{ flex: 1, padding: "12px", border: "none", borderRadius: 10, cursor: templateName.trim() ? "pointer" : "default", background: templateName.trim() ? typeColor : "rgba(255,255,255,0.1)", color: templateName.trim() ? "#fff" : "rgba(255,255,255,0.3)", fontSize: 13, fontWeight: 700, fontFamily: "'DM Sans', sans-serif" }}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {workoutStatus === "active" && (
+        <>
+          <WorkoutTimer startTime={startTime} color={typeColor} />
+          {totalSets > 0 && <div style={{ textAlign: "center", marginBottom: 16, fontSize: 13, color: "rgba(255,255,255,0.4)", fontFamily: "'DM Sans', sans-serif" }}>Sets completed: <span style={{ color: "#22c55e", fontWeight: 700 }}>{totalCompleted}</span> / {totalSets}</div>}
+        </>
+      )}
+
+      {exercises.map((ex, i) => (
+        <ExerciseCard key={i} exercise={ex} typeColor={typeColor} completedSets={completedSetsMap[i] || 0} onAddSet={() => addSet(i)} onUpdateSet={(si, s) => updateSet(i, si, s)} onRemoveSet={(si) => removeSet(i, si)} onRemoveExercise={() => removeExercise(i)} />
+      ))}
+
+      <button onClick={() => setShowPicker(true)} style={{ width: "100%", padding: "14px", border: `2px dashed ${typeColor}40`, borderRadius: 14, background: `${typeColor}08`, color: typeColor, cursor: "pointer", fontSize: 14, fontWeight: 700, fontFamily: "'DM Sans', sans-serif", marginBottom: 16, transition: "all 0.2s" }}>+ Add Exercise</button>
+
+      {exercises.length > 0 && !saved && workoutStatus === "idle" && (
+        <button onClick={handleStart} style={{ width: "100%", padding: "22px", border: "none", borderRadius: 16, cursor: "pointer", fontSize: 20, fontWeight: 900, fontFamily: "'Bebas Neue', sans-serif", letterSpacing: "0.06em", background: "linear-gradient(135deg, #22c55e, #16a34a)", color: "#fff", boxShadow: "0 4px 24px rgba(34,197,94,0.3)", marginBottom: 12 }}>▶ START WORKOUT</button>
+      )}
+
+      {exercises.length > 0 && !saved && workoutStatus === "active" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
+          <button onClick={handleSetComplete} style={{ width: "100%", padding: "22px", border: "none", borderRadius: 16, cursor: "pointer", fontSize: 20, fontWeight: 900, fontFamily: "'Bebas Neue', sans-serif", letterSpacing: "0.06em", background: "linear-gradient(135deg, #eab308, #ca8a04)", color: "#fff", boxShadow: "0 4px 24px rgba(234,179,8,0.3)" }}>✓ SET COMPLETE</button>
+          <button onClick={handleFinish} style={{ width: "100%", padding: "22px", border: "none", borderRadius: 16, cursor: "pointer", fontSize: 20, fontWeight: 900, fontFamily: "'Bebas Neue', sans-serif", letterSpacing: "0.06em", background: "linear-gradient(135deg, #ef4444, #dc2626)", color: "#fff", boxShadow: "0 4px 24px rgba(239,68,68,0.3)" }}>■ FINISH WORKOUT</button>
+        </div>
+      )}
+
+      {saved && <div style={{ width: "100%", padding: "22px", borderRadius: 16, textAlign: "center", fontSize: 20, fontWeight: 900, fontFamily: "'Bebas Neue', sans-serif", letterSpacing: "0.06em", background: "linear-gradient(135deg, #22c55e, #16a34a)", color: "#fff" }}>✓ WORKOUT SAVED!</div>}
+
+      {showPicker && workoutType && <ExercisePicker type={workoutType} onSelect={addExercise} onClose={() => setShowPicker(false)} />}
+    </div>
+  );
+}
+
+function CardioView({ data, setData }) {
+  const [cardioType, setCardioType] = useState("cycling");
+  const [duration, setDuration] = useState("");
+  const [distance, setDistance] = useState("");
+  const [notes, setNotes] = useState("");
+  const [saved, setSaved] = useState(false);
+  const ct = CARDIO_TYPES.find(t => t.id === cardioType);
+
+  const saveSession = async () => {
+    if (!duration) return;
+    const session = { id: Date.now(), date: getToday(), type: cardioType, duration: Number(duration), distance: distance ? Number(distance) : null, notes, pace: distance && duration ? (Number(duration) / Number(distance)).toFixed(2) : null };
+    const newData = { ...data, cardioSessions: [...data.cardioSessions, session] };
+    setData(newData); await saveToStorage(newData);
+    setSaved(true); setTimeout(() => { setDuration(""); setDistance(""); setNotes(""); setSaved(false); }, 1500);
+  };
+
+  return (
+    <div>
+      <h2 style={{ margin: "0 0 16px", fontSize: 24, fontWeight: 900, color: "#fff", fontFamily: "'Bebas Neue', sans-serif", letterSpacing: "0.02em" }}>Cardio Session</h2>
+      <div style={{ display: "flex", gap: 10, marginBottom: 24 }}>
+        {CARDIO_TYPES.map(t => (
+          <button key={t.id} onClick={() => setCardioType(t.id)} style={{ flex: 1, padding: "18px 8px", border: "2px solid", borderColor: cardioType === t.id ? t.color : "rgba(255,255,255,0.08)", borderRadius: 14, cursor: "pointer", background: cardioType === t.id ? `${t.color}15` : "rgba(255,255,255,0.02)", transition: "all 0.25s" }}>
+            <div style={{ fontSize: 28 }}>{t.icon}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: cardioType === t.id ? t.color : "rgba(255,255,255,0.5)", marginTop: 6, fontFamily: "'DM Sans', sans-serif" }}>{t.label}</div>
+          </button>
+        ))}
+      </div>
+      <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 16, padding: 20, marginBottom: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+          <div>
+            <label style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "'DM Sans', sans-serif", fontWeight: 700, display: "block", marginBottom: 6 }}>Duration (min)</label>
+            <input type="number" value={duration} onChange={e => setDuration(e.target.value)} placeholder="0" style={{ width: "100%", padding: "12px 14px", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, background: "rgba(255,255,255,0.04)", color: "#fff", fontSize: 20, fontWeight: 700, fontFamily: "'DM Sans', sans-serif", outline: "none", boxSizing: "border-box" }} />
+          </div>
+          <div>
+            <label style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "'DM Sans', sans-serif", fontWeight: 700, display: "block", marginBottom: 6 }}>Distance (mi)</label>
+            <input type="number" step="0.1" value={distance} onChange={e => setDistance(e.target.value)} placeholder="0.0" style={{ width: "100%", padding: "12px 14px", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, background: "rgba(255,255,255,0.04)", color: "#fff", fontSize: 20, fontWeight: 700, fontFamily: "'DM Sans', sans-serif", outline: "none", boxSizing: "border-box" }} />
+          </div>
+        </div>
+        {distance && duration && (
+          <div style={{ padding: "10px 14px", background: `${ct?.color}10`, borderRadius: 10, marginBottom: 16, textAlign: "center" }}>
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", fontFamily: "'DM Sans', sans-serif" }}>Pace: </span>
+            <span style={{ fontSize: 16, fontWeight: 800, color: ct?.color, fontFamily: "'DM Sans', sans-serif" }}>{(Number(duration) / Number(distance)).toFixed(1)} min/mi</span>
+          </div>
+        )}
+        <div>
+          <label style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "'DM Sans', sans-serif", fontWeight: 700, display: "block", marginBottom: 6 }}>Notes</label>
+          <input type="text" value={notes} onChange={e => setNotes(e.target.value)} placeholder="How did it feel?" style={{ width: "100%", padding: "10px 14px", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, background: "rgba(255,255,255,0.04)", color: "#fff", fontSize: 13, fontFamily: "'DM Sans', sans-serif", outline: "none", boxSizing: "border-box" }} />
+        </div>
+      </div>
+      <button onClick={saveSession} disabled={!duration} style={{ width: "100%", padding: "16px", border: "none", borderRadius: 14, cursor: duration ? "pointer" : "default", fontSize: 15, fontWeight: 800, fontFamily: "'DM Sans', sans-serif", transition: "all 0.3s", background: saved ? "#3AE89F" : (duration ? ct?.color : "rgba(255,255,255,0.1)"), color: saved ? "#111" : (duration ? "#fff" : "rgba(255,255,255,0.3)"), opacity: duration ? 1 : 0.5 }}>
+        {saved ? "✓ Session Saved!" : "Save Session"}
+      </button>
+    </div>
+  );
+}
+
+function HistoryView({ data, setData }) {
+  const [filter, setFilter] = useState("all");
+  const allEntries = [...data.workouts.map(w => ({ ...w, category: "weights" })), ...data.cardioSessions.map(c => ({ ...c, category: "cardio" }))].sort((a, b) => (b.date > a.date ? 1 : -1));
+  const filtered = filter === "all" ? allEntries : filter === "weights" ? allEntries.filter(e => e.category === "weights") : allEntries.filter(e => e.category === "cardio");
+  const deleteEntry = async (entry) => {
+    let newData;
+    if (entry.category === "weights") { newData = { ...data, workouts: data.workouts.filter(w => w.id !== entry.id) }; }
+    else { newData = { ...data, cardioSessions: data.cardioSessions.filter(c => c.id !== entry.id) }; }
+    setData(newData); await saveToStorage(newData);
+  };
+  return (
+    <div>
+      <h2 style={{ margin: "0 0 16px", fontSize: 24, fontWeight: 900, color: "#fff", fontFamily: "'Bebas Neue', sans-serif", letterSpacing: "0.02em" }}>History</h2>
+      <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
+        {["all", "weights", "cardio"].map(f => (
+          <button key={f} onClick={() => setFilter(f)} style={{ padding: "8px 16px", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'DM Sans', sans-serif", textTransform: "capitalize", background: filter === f ? "rgba(232,93,58,0.15)" : "rgba(255,255,255,0.04)", color: filter === f ? "#E85D3A" : "rgba(255,255,255,0.4)" }}>{f}</button>
+        ))}
+      </div>
+      {filtered.length === 0 ? (
+        <div style={{ padding: 40, textAlign: "center", color: "rgba(255,255,255,0.25)", border: "1px dashed rgba(255,255,255,0.08)", borderRadius: 14, fontFamily: "'DM Sans', sans-serif", fontSize: 13 }}>No workouts logged yet.</div>
+      ) : filtered.map((entry, i) => {
+        if (entry.category === "weights") {
+          const typeColor = EXERCISE_DB[entry.type]?.color;
+          return (
+            <div key={i} style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 14, padding: 16, marginBottom: 10, borderLeft: `3px solid ${typeColor}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", fontFamily: "'DM Sans', sans-serif" }}>{formatDate(entry.date)}</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: typeColor, fontFamily: "'DM Sans', sans-serif", marginTop: 4 }}>{EXERCISE_DB[entry.type]?.label}</div>
+                </div>
+                <button onClick={() => deleteEntry(entry)} style={{ background: "rgba(255,60,60,0.08)", border: "none", color: "rgba(255,60,60,0.5)", cursor: "pointer", fontSize: 11, padding: "4px 10px", borderRadius: 8, fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}>Delete</button>
+              </div>
+              <div style={{ marginTop: 10 }}>
+                {entry.exercises.map((ex, j) => (
+                  <div key={j} style={{ padding: "6px 0", borderBottom: j < entry.exercises.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none" }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.7)", fontFamily: "'DM Sans', sans-serif" }}>{EQUIPMENT_ICONS[ex.equipment]} {ex.name}</div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2, fontFamily: "'DM Sans', sans-serif" }}>{ex.sets.map((s) => `${s.weight}lb × ${s.reps}`).join(" → ")}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        } else {
+          const ct = CARDIO_TYPES.find(t => t.id === entry.type);
+          return (
+            <div key={i} style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 14, padding: 16, marginBottom: 10, borderLeft: `3px solid ${ct?.color}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", fontFamily: "'DM Sans', sans-serif" }}>{formatDate(entry.date)}</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: ct?.color, fontFamily: "'DM Sans', sans-serif", marginTop: 4 }}>{ct?.icon} {ct?.label}</div>
+                </div>
+                <button onClick={() => deleteEntry(entry)} style={{ background: "rgba(255,60,60,0.08)", border: "none", color: "rgba(255,60,60,0.5)", cursor: "pointer", fontSize: 11, padding: "4px 10px", borderRadius: 8, fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}>Delete</button>
+              </div>
+              <div style={{ display: "flex", gap: 16, marginTop: 10 }}>
+                <div><div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", fontFamily: "'DM Sans', sans-serif" }}>Duration</div><div style={{ fontSize: 15, fontWeight: 700, color: "#fff", fontFamily: "'DM Sans', sans-serif" }}>{formatDuration(entry.duration)}</div></div>
+                {entry.distance && <div><div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", fontFamily: "'DM Sans', sans-serif" }}>Distance</div><div style={{ fontSize: 15, fontWeight: 700, color: "#fff", fontFamily: "'DM Sans', sans-serif" }}>{entry.distance} mi</div></div>}
+                {entry.pace && <div><div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", fontFamily: "'DM Sans', sans-serif" }}>Pace</div><div style={{ fontSize: 15, fontWeight: 700, color: "#fff", fontFamily: "'DM Sans', sans-serif" }}>{entry.pace} min/mi</div></div>}
+              </div>
+              {entry.notes && <div style={{ marginTop: 8, fontSize: 12, color: "rgba(255,255,255,0.35)", fontStyle: "italic", fontFamily: "'DM Sans', sans-serif" }}>"{entry.notes}"</div>}
+            </div>
+          );
+        }
+      })}
+    </div>
+  );
+}
+
+function ExerciseLibrary() {
+  const [activeGroup, setActiveGroup] = useState("push");
+  const [equipFilter, setEquipFilter] = useState("all");
+  const group = EXERCISE_DB[activeGroup];
+  const exercises = equipFilter === "all" ? group.exercises : group.exercises.filter(e => e.equipment === equipFilter);
+  const byMuscle = {};
+  exercises.forEach(ex => { if (!byMuscle[ex.primary]) byMuscle[ex.primary] = []; byMuscle[ex.primary].push(ex); });
+  return (
+    <div>
+      <h2 style={{ margin: "0 0 16px", fontSize: 24, fontWeight: 900, color: "#fff", fontFamily: "'Bebas Neue', sans-serif", letterSpacing: "0.02em" }}>Exercise Library</h2>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        {Object.entries(EXERCISE_DB).map(([key, val]) => (
+          <button key={key} onClick={() => setActiveGroup(key)} style={{ padding: "8px 16px", border: "2px solid", borderColor: activeGroup === key ? val.color : "rgba(255,255,255,0.08)", borderRadius: 10, cursor: "pointer", background: activeGroup === key ? `${val.color}15` : "transparent", color: activeGroup === key ? val.color : "rgba(255,255,255,0.4)", fontSize: 13, fontWeight: 700, fontFamily: "'DM Sans', sans-serif" }}>{val.label}</button>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
+        {["all", "barbell", "dumbbells", "bodyweight", "cable"].map(f => (
+          <button key={f} onClick={() => setEquipFilter(f)} style={{ padding: "6px 12px", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", textTransform: "capitalize", background: equipFilter === f ? `${group.color}20` : "rgba(255,255,255,0.04)", color: equipFilter === f ? group.color : "rgba(255,255,255,0.4)" }}>{f === "all" ? "All" : `${EQUIPMENT_ICONS[f]} ${f}`}</button>
+        ))}
+      </div>
+      {Object.entries(byMuscle).map(([muscle, exs]) => (
+        <div key={muscle} style={{ marginBottom: 20 }}>
+          <h4 style={{ fontSize: 12, fontWeight: 700, color: group.color, textTransform: "uppercase", letterSpacing: "0.08em", margin: "0 0 10px", fontFamily: "'DM Sans', sans-serif", borderBottom: `1px solid ${group.color}20`, paddingBottom: 6 }}>{muscle}</h4>
+          {exs.map((ex, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", background: "rgba(255,255,255,0.02)", borderRadius: 10, marginBottom: 4, border: "1px solid rgba(255,255,255,0.04)" }}>
+              <ExerciseIllustration name={ex.name} equipment={ex.equipment} size={42} color={group.color} />
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "rgba(255,255,255,0.8)", fontFamily: "'DM Sans', sans-serif" }}>{ex.name}</div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", fontFamily: "'DM Sans', sans-serif", textTransform: "capitalize" }}>{EQUIPMENT_ICONS[ex.equipment]} {ex.equipment}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Main App ───────────────────────────────────────────────
+function FitnessTracker() {
+  const [tab, setTab] = useState("today");
+  const [data, setData] = useState({ workouts: [], cardioSessions: [] });
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const stored = await loadFromStorage();
+      if (stored && (stored.workouts?.length || stored.cardioSessions?.length)) setData(stored);
+      setLoaded(true);
+    })();
+  }, []);
+
+  const getSuggestedType = useCallback(() => {
+    const recent = [...data.workouts].sort((a, b) => (b.date > a.date ? 1 : -1));
+    if (recent.length === 0) return "push";
+    const lastType = recent[0].type;
+    return { push: "pull", pull: "legs", legs: "push" }[lastType] || "push";
+  }, [data.workouts]);
+
+  if (!loaded) return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#111114", color: "#E85D3A", fontFamily: "'Bebas Neue', sans-serif", fontSize: 28 }}>Loading...</div>
+  );
+
+  return (
+    <div style={{ minHeight: "100vh", minHeight: "100dvh", background: "linear-gradient(180deg, #111114 0%, #0d0d10 100%)", color: "#fff", fontFamily: "'DM Sans', sans-serif" }}>
+      <div style={{ maxWidth: 520, margin: "0 auto", padding: "20px 16px 100px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
+          <div style={{ width: 42, height: 42, borderRadius: 12, background: "linear-gradient(135deg, #E85D3A, #E8A83A)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 900 }}>⚡</div>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 900, fontFamily: "'Bebas Neue', sans-serif", letterSpacing: "0.04em", lineHeight: 1 }}>IRON PULSE</h1>
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 600 }}>Push · Pull · Legs · Cardio</div>
+          </div>
+        </div>
+        <TabBar activeTab={tab} onTabChange={setTab} />
+        {tab === "today" && <TodayView data={data} getSuggestedType={getSuggestedType} />}
+        {tab === "weights" && <WeightsView data={data} setData={setData} getSuggestedType={getSuggestedType} />}
+        {tab === "cardio" && <CardioView data={data} setData={setData} />}
+        {tab === "history" && <HistoryView data={data} setData={setData} />}
+        {tab === "exercises" && <ExerciseLibrary />}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<FitnessTracker />);
+</script>
+</body>
+</html>
